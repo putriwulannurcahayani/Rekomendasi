@@ -1,0 +1,28 @@
+{
+	"info": {
+		"_postman_id": "021549a3-7ecf-4263-8a00-3812c65d31d2",
+		"name": "Ulasan",
+		"schema": "https://schema.getpostman.com/json/collection/v2.0.0/collection.json",
+		"_exporter_id": "30316674"
+	},
+	"item": [
+		{
+			"name": "New Request",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\r\n  \"generated_review\": \"Pelayanan sangat bagus dan cepat!\",\r\n  \"rating\": 5,\r\n  \"kategori\": \"Baik\"\r\n}\r\n",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": "http://localhost:5000/predict"
+			},
+			"response": []
+		}
+	]
+}

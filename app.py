@@ -1,75 +1,75 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, Response
 import numpy as np
-import tensorflow as tf
 from tensorflow.keras.models import load_model
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+import pickle
+import json
 
-# Model kustom
-class MatrixFactorization(tf.keras.Model):
-    def __init__(self, n_users, n_places, embedding_dim=32, **kwargs):
-        super().__init__(**kwargs)
-        self.n_users = n_users
-        self.n_places = n_places
-        self.embedding_dim = embedding_dim
-
-        self.user_embedding = tf.keras.layers.Embedding(n_users, embedding_dim)
-        self.place_embedding = tf.keras.layers.Embedding(n_places, embedding_dim)
-
-    def call(self, inputs):
-        user_vec = self.user_embedding(inputs[:, 0])
-        place_vec = self.place_embedding(inputs[:, 1])
-        return tf.reduce_sum(user_vec * place_vec, axis=1)
-
-    def get_config(self):
-        return {
-            "n_users": self.n_users,
-            "n_places": self.n_places,
-            "embedding_dim": self.embedding_dim
-        }
-
-    @classmethod
-    def from_config(cls, config):
-        return cls(**config)
-
-# Load model
-model = load_model("model_rekomendasi.keras", custom_objects={"MatrixFactorization": MatrixFactorization})
-
-# Flask app
 app = Flask(__name__)
 
+# Load model dan tokenizer
+model = load_model('label_cacalan.h5')
+with open('tokenizer.pkl', 'rb') as f:
+    tokenizer = pickle.load(f)
+
+# Parameter
+max_len = 20
+vocab_size = len(tokenizer.word_index) + 1
+
+# Fungsi untuk generate review dari rating
+def generate_review(seed_rating, max_len=20):
+    result = []
+    input_seq = [seed_rating]  # gunakan rating sebagai seed awal
+
+    for _ in range(max_len):
+        padded = pad_sequences([input_seq], maxlen=max_len, padding='post')
+        prediction = model.predict(padded, verbose=0)
+        predicted_id = np.argmax(prediction[0])
+
+        if predicted_id == 0:
+            break  # jika end token
+
+        result.append(predicted_id)
+        input_seq.append(predicted_id)
+
+    # Ubah token ID ke kata
+    reversed_word_index = {v: k for k, v in tokenizer.word_index.items()}
+    predicted_words = [reversed_word_index.get(i, '') for i in result]
+    return ' '.join(predicted_words).strip()
+
+# Endpoint prediksi
 @app.route('/predict', methods=['POST'])
 def predict():
     data = request.get_json()
 
-    if not data or "user_id" not in data or "candidates" not in data:
-        return jsonify({"error": "Harap kirim 'user_id' dan 'candidates'"}), 400
+    if not data or 'rating' not in data:
+        return Response(json.dumps({"error": "Request JSON harus memiliki key 'rating'"}), mimetype='application/json', status=400)
 
-    user_id = data["user_id"]
-    candidates = data["candidates"]  # List of place IDs (int)
+    try:
+        rating = int(data['rating'])
+    except ValueError:
+        return Response(json.dumps({"error": "Rating harus berupa angka 1 sampai 5"}), mimetype='application/json', status=400)
 
-    input_data = np.array([[user_id, place_id] for place_id in candidates])
-    predictions = model.predict(input_data, verbose=0)
+    if rating < 1 or rating > 5:
+        return Response(json.dumps({"error": "Rating harus antara 1 sampai 5"}), mimetype='application/json', status=400)
 
-    # Ambil 3 tempat dengan skor prediksi tertinggi
-    top_indices = predictions.argsort()[-3:][::-1]
-    rekomendasi = [candidates[i] for i in top_indices]
+    # Generate review dari rating
+    generated_review = generate_review(seed_rating=rating, max_len=max_len)
 
-    return jsonify({
-        "user_id": user_id,
-        "rekomendasi_tempat_id": rekomendasi,
-        "scores": [float(predictions[i]) for i in top_indices]
-    })
-@app.route('/', methods=['GET'])
-def home():
-    return jsonify({
-        "message": "API Rekomendasi Tempat sudah berjalan.",
-        "usage": {
-            "POST /predict": {
-                "body": {
-                    "user_id": "int",
-                    "candidates": "[list of int]"
-                }
-            }
-        }
-    })
-if __name__ == "__main__":
+    # Tambahkan dummy review jika hasil kosong
+    if not generated_review:
+        generated_review = "Pelayanan sangat bagus dan cepat!"
+
+    kategori = "Buruk" if rating <= 2 else "Baik"
+
+    # Kembalikan hasil dengan urutan sesuai permintaan
+    response_data = {
+        "review": generated_review,
+        "rating": rating,
+        "kategori": kategori
+    }
+
+    return Response(json.dumps(response_data), mimetype='application/json')
+
+if __name__ == '__main__':
     app.run(debug=True)
